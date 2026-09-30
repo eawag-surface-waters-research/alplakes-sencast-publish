@@ -1,0 +1,14 @@
+name: sencast-publish
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - gdal
+  - numpy
+  - pandas
+  - xarray
+  - netcdf4
+  - awscli
+  - matplotlib
+  - jupyterlab
+  - pytest
