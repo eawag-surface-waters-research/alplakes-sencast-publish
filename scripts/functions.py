@@ -110,7 +110,8 @@ def grid_of(ds):
 
 def read_band(path):
     """Read band 1 as float32 with the nodata value (if any) replaced by NaN."""
-    band = gdal.Open(path).GetRasterBand(1)
+    ds = gdal.Open(path)  # keep a reference: the band is invalid once the dataset is freed
+    band = ds.GetRasterBand(1)
     arr = band.ReadAsArray().astype(np.float32)
     nodata = band.GetNoDataValue()
     if nodata is not None and not np.isnan(nodata):
