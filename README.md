@@ -129,7 +129,7 @@ To make a new release:
      README.md          the release file
      alplakes_s3.ini    Sencast parameter file at the pinned commit
      code.zip           git archive --format=zip --prefix=alplakes-sencast-publish/ -o code.zip {release}
-     netcdf/{lake}.nc   the NetCDFs
+     data.zip           the NetCDFs as data/{lake}.nc
    ```
 5. Publish on [ERIC](https://scientific-it.eawag.ch/services/rdm/publish/) and add the DOI to the table above.
 
