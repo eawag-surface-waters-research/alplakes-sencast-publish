@@ -5,6 +5,7 @@ import logging
 import os
 import re
 import subprocess
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import numpy as np
 import pandas as pd
@@ -15,29 +16,38 @@ gdal.UseExceptions()
 gdal.PushErrorHandler("CPLQuietErrorHandler")  # silence PROJ db warnings from the sencast env; errors still raise
 log = logging.getLogger("tiff_to_netcdf")
 
-# Sencast version that produced the input GeoTIFFs, recorded in the NetCDF attributes
-SENCAST_COMMIT = "3d581e8d546d9d691f6a62e9bc59dae1809f3d01"
+# Sencast version that produced the input GeoTIFFs, recorded in the NetCDF attributes.
+# Check the commit hashes recorded per scene in the Alplakes metadata (s3://eawagrs/alplakes/metadata/{sensor}/{lake}/{param}.json, key "c").
+SENCAST_COMMIT = "d797620940c82a8046b95f1ab268199ef9314350"
 SENCAST_DOCKER_IMAGE = "0.2.0"
 
+# {PRODUCT}_{param}_{platform}_{YYYYMMDDTHHMMSS}[_{MGRS tile}]_{lake}[_lowres].tif
 FILENAME = re.compile(
-    r"^(?P<product>[A-Z0-9]+_[A-Za-z0-9_]+?)_(?P<sat>S3[AB])_(?P<time>\d{8}T\d{6})_(?P<lake>.+)\.tif$"
+    r"^(?P<product>[A-Z0-9]+_[A-Za-z0-9_]+?)_(?P<sat>S\d[A-Z])_(?P<time>\d{8}T\d{6})"
+    r"(?:_(?P<tile>T\d{2}[A-Z]{3}))?_(?P<lake>[A-Za-z0-9_-]+?)(?P<lowres>_lowres)?\.tif$"
 )
 
-# product -> (variable name, attributes)
-PRODUCTS = {
-    "OC3_chla": ("chla_oc3", {
-        "long_name": "Chlorophyll-a concentration (OC3)",
-        "standard_name": "mass_concentration_of_chlorophyll_a_in_sea_water",
-        "units": "mg m-3"}),
-    "COMBINE_tsm_binding754": ("tsm_binding754", {
-        "long_name": "Total suspended matter (Binding 754)",
-        "standard_name": "mass_concentration_of_suspended_matter_in_sea_water",
-        "units": "g m-3"}),
-    "SECCHIDEPTH_Zsd_lee": ("secchi_lee", {
-        "long_name": "Secchi depth (Lee)",
-        "standard_name": "secchi_depth_of_sea_water",
-        "units": "m"}),
-    "FORELULE_forel_ule": ("forel_ule", {"long_name": "Forel-Ule colour index", "units": "1"}),
+# sensor -> display name and products; products map Sencast product -> (variable name, attributes).
+# A new sensor is added here; its data lives in data/{tiff,netcdf}/{sensor} and the bucket's {sensor}/ prefix.
+SENSORS = {
+    "sentinel3": {
+        "name": "Sentinel-3 OLCI",
+        "products": {
+            "OC3_chla": ("chla_oc3", {
+                "long_name": "Chlorophyll-a concentration (OC3)",
+                "standard_name": "mass_concentration_of_chlorophyll_a_in_sea_water",
+                "units": "mg m-3"}),
+            "COMBINE_tsm_binding754": ("tsm_binding754", {
+                "long_name": "Total suspended matter (Binding 754)",
+                "standard_name": "mass_concentration_of_suspended_matter_in_sea_water",
+                "units": "g m-3"}),
+            "SECCHIDEPTH_Zsd_lee": ("secchi_lee", {
+                "long_name": "Secchi depth (Lee)",
+                "standard_name": "secchi_depth_of_sea_water",
+                "units": "m"}),
+            "FORELULE_forel_ule": ("forel_ule", {"long_name": "Forel-Ule colour index", "units": "1"}),
+        },
+    },
 }
 
 
@@ -50,11 +60,18 @@ def in_window(t, start=None, end=None):
     return True
 
 
-def sync_bucket(source, dest, lakes=None, start=None, end=None):
-    """Mirror GeoTIFFs from an S3 prefix into dest/{lake}/ using `aws s3 sync`.
+def list_lakes(source):
+    """Return the lake folders directly under an S3 prefix."""
+    out = subprocess.run(["aws", "s3", "ls", source.rstrip("/") + "/"], capture_output=True, text=True, check=True).stdout
+    return [line.split()[-1].rstrip("/") for line in out.splitlines() if line.strip().startswith("PRE ")]
 
-    Only the products in PRODUCTS are downloaded (which also leaves out Sencast's temp_*.tif files),
+
+def sync_bucket(source, dest, products, lakes=None, start=None, end=None, workers=8):
+    """Mirror GeoTIFFs from an S3 prefix into dest/{lake}/ using one `aws s3 sync` per lake.
+
+    Only the given products are downloaded (which also leaves out Sencast's temp_*.tif and _lowres files),
     and only years overlapping [start, end]; day-level trimming is left to prune_files.
+    Syncing per lake keeps each listing small; patterns are relative to the lake folder.
     """
     source = source.rstrip("/") + "/"
     if start is not None or end is not None:
@@ -63,14 +80,28 @@ def sync_bucket(source, dest, lakes=None, start=None, end=None):
         years = [str(year) for year in range(first, last + 1)]
     else:
         years = [""]
-    patterns = [f"*/{product}_S3?_{year}*.tif" for product in PRODUCTS for year in years]
-    filters = ["--exclude", "*"] + [arg for p in patterns for arg in ("--include", p)]
+    patterns = [f"{product}_S??_{year}*.tif" for product in products for year in years]
+    filters = ["--exclude", "*"] + [arg for p in patterns for arg in ("--include", p)] + ["--exclude", "*_lowres.tif"]
 
-    targets = [(source + f"{lake}/", os.path.join(dest, lake)) for lake in lakes] if lakes else [(source, dest)]
-    for src, dst in targets:
-        log.info("Syncing %s -> %s", src, dst)
+    def sync(lake):
+        dst = os.path.join(dest, lake)
         os.makedirs(dst, exist_ok=True)
-        subprocess.run(["aws", "s3", "sync", src, dst, "--only-show-errors", *filters], check=True)
+        subprocess.run(["aws", "s3", "sync", source + f"{lake}/", dst, "--only-show-errors", *filters], check=True)
+
+    lakes = lakes or list_lakes(source)
+    log.info("Syncing %d lakes from %s", len(lakes), source)
+    failed = []
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {pool.submit(sync, lake): lake for lake in lakes}
+        for fut in as_completed(futures):
+            try:
+                fut.result()
+                log.info("%s: synced", futures[fut])
+            except subprocess.CalledProcessError:
+                log.exception("%s: sync failed", futures[fut])
+                failed.append(futures[fut])
+    if failed:
+        raise RuntimeError(f"Sync failed for {len(failed)} lakes: {', '.join(sorted(failed))}")
 
 
 def prune_files(root, start=None, end=None, lakes=None):
@@ -88,13 +119,13 @@ def prune_files(root, start=None, end=None, lakes=None):
     log.info("Removed %d files outside the time window", removed)
 
 
-def index_files(root):
-    """Return {lake: [(product, sat, time, path), ...]}, skipping unrecognised files."""
+def index_files(root, products):
+    """Return {lake: [(product, sat, time, path), ...]}, skipping unrecognised, unwanted and _lowres files."""
     lakes = collections.defaultdict(list)
     skipped = 0
     for path in sorted(glob.glob(os.path.join(root, "*", "*.tif"))):
         m = FILENAME.match(os.path.basename(path))
-        if not m or m["product"] not in PRODUCTS:
+        if not m or m["product"] not in products or m["lowres"]:
             skipped += 1
             log.debug("Skipping %s", path)
             continue
@@ -119,8 +150,10 @@ def read_band(path):
     return arr
 
 
-def build_lake(lake, files, out_path):
+def build_lake(lake, files, out_path, sensor):
     """Write one NetCDF for a lake from its GeoTIFFs; returns (lake, n_times, valid scenes per variable).
+
+    sensor is an entry of SENSORS (display name and products).
 
     The lake's grid is the most common one among its files; files on any other grid are skipped.
     Products are written one at a time so only one (time, lat, lon) array is held in memory.
@@ -155,7 +188,7 @@ def build_lake(lake, files, out_path):
         "time": ("time", pd.DatetimeIndex(times), {"standard_name": "time", "long_name": "acquisition time", "axis": "T"}),
         "lat": ("lat", lat, {"standard_name": "latitude", "units": "degrees_north", "axis": "Y"}),
         "lon": ("lon", lon, {"standard_name": "longitude", "units": "degrees_east", "axis": "X"}),
-        "satellite": ("time", np.array([sat_by_time[t] for t in times]), {"long_name": "Sentinel-3 satellite"}),
+        "satellite": ("time", np.array([sat_by_time[t] for t in times]), {"long_name": "Satellite platform"}),
     }
     base = xr.Dataset({"spatial_ref": ((), np.int32(0), {
         "crs_wkt": wkt,
@@ -163,10 +196,10 @@ def build_lake(lake, files, out_path):
         "semi_major_axis": 6378137.0,
         "inverse_flattening": 298.257223563,
     })}, coords=coords, attrs={
-        "title": f"Sencast Sentinel-3 water quality products for {lake}",
+        "title": f"Sencast {sensor['name']} water quality products for {lake}",
         "lake": lake,
         "Conventions": "CF-1.8",
-        "source": "Sentinel-3 OLCI processed with Sencast (https://github.com/eawag-surface-waters-research/sencast)",
+        "source": f"{sensor['name']} processed with Sencast (https://github.com/eawag-surface-waters-research/sencast)",
         "sencast_commit": SENCAST_COMMIT,
         "sencast_docker_image": SENCAST_DOCKER_IMAGE,
         "date_created": now,
@@ -190,7 +223,7 @@ def build_lake(lake, files, out_path):
             "lon": {"_FillValue": None},
         })
         for product in sorted(by_product):
-            name, attrs = PRODUCTS[product]
+            name, attrs = sensor["products"][product]
             arr = np.full((len(times), ny, nx), np.nan, dtype=np.float32)
             for i, path in by_product[product]:
                 arr[i] = read_band(path)

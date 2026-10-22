@@ -33,6 +33,11 @@ def test_filename_regex():
     assert F.FILENAME.match("OC3_chla_S3A_20160429T100135_lake_with_underscores.tif")["lake"] == "lake_with_underscores"
     # Sencast leftovers must not be picked up
     assert F.FILENAME.match("temp_OC3_chla_S3B_20250528T095312_como.tif") is None
+    # Other sensors: optional MGRS tile and _lowres suffix
+    m = F.FILENAME.match("POLYMER_tsm_dogliotti665_S2C_20260923T103741_T31TGM_geneva_lowres.tif")
+    assert (m["product"], m["sat"], m["tile"], m["lake"], m["lowres"]) == (
+        "POLYMER_tsm_dogliotti665", "S2C", "T31TGM", "geneva", "_lowres")
+    assert m.re.match("OC3_chla_S3A_20160429T100135_como.tif")["tile"] is None
 
 
 def test_in_window():
@@ -67,7 +72,7 @@ def test_build_lake(tmp_path):
         ("COMBINE_tsm_binding754", "S3A", t1, write_tif(tmp_path / "t1.tif", a * 2)),
     ]
     out = tmp_path / "x.nc"
-    lake, nt, counts = F.build_lake("x", files, str(out))
+    lake, nt, counts = F.build_lake("x", files, str(out), F.SENSORS["sentinel3"])
 
     assert (lake, nt, counts) == ("x", 2, {"chla_oc3": 2, "tsm_binding754": 1})
     assert not os.path.exists(str(out) + ".tmp")
