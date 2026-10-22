@@ -67,9 +67,9 @@ The Sencast version that produced the input GeoTIFFs is recorded in every NetCDF
   ```
   It contains GDAL, numpy, pandas, xarray, netCDF4, the AWS CLI and pytest, plus matplotlib and JupyterLab for the notebook.
 
-  To reproduce a release exactly, use `environment.lock.txt` instead. It lists the exact package versions used to build the published data (Linux 64-bit):
+  To reproduce a release exactly, use that release's lock file in `releases/` instead. It lists the exact package versions used to build the published data (Linux 64-bit):
   ```bash
-  conda create -n sencast-publish --file environment.lock.txt
+  conda create -n sencast-publish --file releases/sentinel3_2016-2025.lock.txt
   ```
 - Read access to `s3://eawagrs` for the AWS CLI (only needed for `--sync`).
 
@@ -111,14 +111,16 @@ pytest
 
 ## Releases
 
-Each published dataset has a release file in [`releases/`](releases/). It describes the data, including coverage, variables, lakes, limitations and citation, and records the Sencast version and the command used to produce it. Upload this file alongside the NetCDFs.
+Each published dataset has a release file and a lock file in [`releases/`](releases/):
+- `{release}.md` describes the data, including coverage, variables, lakes, limitations and contacts, and records the Sencast version and the command used to produce it. Upload this file alongside the NetCDFs as `README.md`.
+- `{release}.lock.txt` lists the exact conda packages used to build it.
 
 | Release | Sensor | Period | Lakes | DOI |
 |---------|--------|--------|------:|-----|
 | [sentinel3_2016-2025](releases/sentinel3_2016-2025.md) | Sentinel-3 OLCI | 2016-04 – 2025-12 | 53 | pending |
 
 To make a new release:
-1. Build the NetCDFs and refresh `environment.lock.txt` (`conda list -n <env> --explicit > environment.lock.txt`).
+1. Build the NetCDFs, then save the environment used as the release's lock file (`conda list -n <env> --explicit > releases/<release>.lock.txt`).
 2. Copy the latest release file, then update its coverage, lake table, versions and Sencast parameter file. Always link the parameter file at the pinned Sencast commit, not `master`.
 3. Commit, then tag the commit of this repository that was used.
 4. Publish on [ERIC](https://scientific-it.eawag.ch/services/rdm/publish/) and add the DOI to the table above.
@@ -130,9 +132,8 @@ scripts/main.py        command-line entry point
 scripts/functions.py   sensor config, S3 sync, date filtering, GeoTIFF → NetCDF conversion
 tests/                 pytest tests for scripts/functions.py
 notebooks/             exploration of the output NetCDFs
-releases/              documentation for each published dataset
+releases/              documentation and conda lock file for each published dataset
 environment.yml        conda environment
-environment.lock.txt   exact package versions used for the published release
 data/                  downloaded and generated data (git-ignored)
 ```
 

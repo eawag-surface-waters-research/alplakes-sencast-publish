@@ -1,11 +1,20 @@
-# Data (synced from S3 / generated)
+# Data (synced from S3 / generated), also when written outside data/ with --input/--output
 data/
+*.tif
+*.nc
+*.nc.tmp
+*.aux.xml
+
+# Run logs and release packaging (code.zip, upload folders)
+*.log
+*.zip
 
 # Python
 __pycache__/
 *.py[cod]
 .venv/
 venv/
+.pytest_cache/
 
 # Jupyter
 .ipynb_checkpoints/
