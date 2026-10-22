@@ -112,7 +112,7 @@ pytest
 ## Releases
 
 Each published dataset has a release file and a lock file in [`releases/`](releases/):
-- `{release}.md` describes the data, including coverage, variables, lakes, limitations and contacts, and records the Sencast version and the command used to produce it. Upload this file alongside the NetCDFs as `README.md`.
+- `{release}.md` describes the data, including coverage, variables, lakes, limitations and contacts, and records the Sencast version and the command used to produce it. It is uploaded as the package's `README.md`.
 - `{release}.lock.txt` lists the exact conda packages used to build it.
 
 | Release | Sensor | Period | Lakes | DOI |
@@ -123,7 +123,15 @@ To make a new release:
 1. Build the NetCDFs, then save the environment used as the release's lock file (`conda list -n <env> --explicit > releases/<release>.lock.txt`).
 2. Copy the latest release file, then update its coverage, lake table, versions and Sencast parameter file. Always link the parameter file at the pinned Sencast commit, not `master`.
 3. Commit, then tag the commit of this repository that was used.
-4. Publish on [ERIC](https://scientific-it.eawag.ch/services/rdm/publish/) and add the DOI to the table above.
+4. Assemble the upload package:
+   ```
+   {release}/
+     README.md          the release file
+     alplakes_s3.ini    Sencast parameter file at the pinned commit
+     code.zip           git archive --format=zip --prefix=alplakes-sencast-publish/ -o code.zip {release}
+     netcdf/{lake}.nc   the NetCDFs
+   ```
+5. Publish on [ERIC](https://scientific-it.eawag.ch/services/rdm/publish/) and add the DOI to the table above.
 
 ## Repository layout
 
