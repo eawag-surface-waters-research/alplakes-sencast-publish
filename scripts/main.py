@@ -54,6 +54,9 @@ def main():
         for lake in sorted(set(args.lakes) - set(lakes)):
             log.warning("%s: no GeoTIFFs found in %s", lake, args.input)
         lakes = {k: v for k, v in lakes.items() if k in args.lakes}
+    for lake in sensor["exclude"]:
+        if lakes.pop(lake, None):
+            log.info("%s: excluded, skipping", lake)
     os.makedirs(args.output, exist_ok=True)
 
     jobs = {}

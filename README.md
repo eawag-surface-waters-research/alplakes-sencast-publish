@@ -48,7 +48,7 @@ Each `{lake}.nc` follows CF-1.8:
 
 ### Sensors and products
 
-Sensors are configured in `SENSORS` in [`scripts/functions.py`](scripts/functions.py). Each entry has a display name and maps Sencast product names to NetCDF variable names and attributes. A sensor's data lives under `data/tiff/{sensor}`, `data/netcdf/{sensor}` and `s3://eawagrs/alplakes/cropped/{sensor}/`.
+Sensors are configured in `SENSORS` in [`scripts/functions.py`](scripts/functions.py). Each entry has a display name, maps Sencast product names to NetCDF variable names and attributes, and lists the lakes to `exclude` because their data is too sparse. A sensor's data lives under `data/tiff/{sensor}`, `data/netcdf/{sensor}` and `s3://eawagrs/alplakes/cropped/{sensor}/`.
 
 | Sensor      | Products → variables |
 |-------------|----------------------|
@@ -117,7 +117,7 @@ Each published dataset has a release file and a lock file in [`releases/`](relea
 
 | Release | Sensor | Period | Lakes | DOI |
 |---------|--------|--------|------:|-----|
-| [sentinel3_2016-2025](releases/sentinel3_2016-2025.md) | Sentinel-3 OLCI | 2016-04 – 2025-12 | 53 | pending |
+| [sentinel3_2016-2025](releases/sentinel3_2016-2025.md) | Sentinel-3 OLCI | 2016-04 – 2025-12 | 50 | pending |
 
 To make a new release:
 1. Build the NetCDFs, then save the environment used as the release's lock file (`conda list -n <env> --explicit > releases/<release>.lock.txt`).

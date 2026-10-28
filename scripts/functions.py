@@ -47,6 +47,8 @@ SENSORS = {
                 "units": "m"}),
             "FORELULE_forel_ule": ("forel_ule", {"long_name": "Forel-Ule colour index", "units": "1"}),
         },
+        # Lakes left out of the output because their data is too sparse to be useful.
+        "exclude": ["baldegg", "bled", "simssee"],
     },
 }
 
